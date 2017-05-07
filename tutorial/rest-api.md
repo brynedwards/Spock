@@ -378,7 +378,7 @@ to perform some database actions.
 
 Now we're ready to use our database in our application. Let's change our
 POST /person function to insert the parsed `Person` into our database. In your
-`post "person` function, change the `Just thePerson` pattern match to the following:
+`post "person"` function, change the `Just thePerson` pattern match to the following:
 
 {% highlight haskell %}
 
