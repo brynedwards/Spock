@@ -13,18 +13,26 @@ hackage_base: //hackage.haskell.org/package
 # Overview
 
 In this tutorial, we're going to use Spock to build a simple RESTful API
-with a database backend. This tutorial covers:
+that will let us add people to a database and then retrieve a list of who
+we've added. For example:
 
-- Setting up a project using [Stack](https://docs.haskellstack.org/en/stable/README/)
-- Spock routing: GET, POST
-- Send and receiving Haskell data types as JSON
-- Adding a database connection pool to Spock
-- Using [Persistent](//www.yesodweb.com/book/persistent)
-  - Creating a database schema
-  - Running queries in Spock routes
+```
+$ curl -H "Content-Type: application/json" -d '{ "name": "Walter", "age": 50 }' localhost:8080/people
+{"result":"success","id":1}
+
+$ curl -H "Content-Type: application/json" -d '{ "name": "Jesse", "age": 22 }' localhost:8080/people
+{"result":"success","id":2}
+
+$ curl localhost:8080/people
+[{"age":50,"name":"Walter","id":1},{"age":22,"name":"Jesse","id":2}]
+```
+
+We'll be using [curl](//curl.haxx.se/) to interact with our API so you should have
+that or another way to perform HTTP requests. `curl` examples are provided throughout
+the tutorial.
 
 You can find the finished code
-[here](//github.com/brynedwards/spock-tutorials/tree/master/rest-api). "part1"
+[here](//github.com/brynedwards/spock-tutorials/tree/8cdbe822cfdbfdf4480f50cbba65d04590a709de/rest-api). "part1"
 covers up to Adding a Database; "part2" covers up to Finishing up. 
 
 # Project Setup
@@ -126,7 +134,7 @@ So we have to tell GHCi what we want type we want it to try decode our bytestrin
 otherwise it will default to (). We can also decode it as Aeson's generic `Value` type:
 
 ```
-λ> decode "{ \"name\": \"Amy\", \"age\": 30 }" :: Maybe Person
+λ> decode "{ \"name\": \"Amy\", \"age\": 30 }" :: Maybe Value
 Just (Object (fromList [("age",Number 30.0),("name",String "Amy")]))
 ```
 
@@ -137,17 +145,28 @@ following to your `Main.hs`:
 
 {% highlight haskell %}
 
+type Api = SpockM () () () ()
+
+type ApiAction a = SpockAction () () () a
+
 main :: IO ()
 main = do
   spockCfg <- defaultSpockCfg () PCNoDatabase ()
   runSpock 8080 (spock spockCfg app)
 
-app :: SpockM () () () ()
+app :: Api
 app = do
-  get "person" $ do
+  get "people" $ do
     json $ Person { name = "Fry", age = 25 }
 
 {% endhighlight %}
+
+Our `Api` type represents our application's confinguration. In the second
+part we'll be modifying it to add a database backend, but for now we'll
+leave all the types as Unit. Our `ApiAction` type is similar and represents
+actions in our application which are functions performed by route matches
+(e.g. `get "people"`). We'll be using `ApiAction` later to explicitly declare
+some types used in actions.
 
 Spock includes a `json` function for serving any type that implements the
 `ToJSON` typeclass, which means you can pass your `Person` and it will encode
@@ -164,7 +183,7 @@ Ok, modules loaded: Lib, Main.
 Spock is running on port 8080 
 ```
 
-Go to [localhost:8080/person](//localhost:8080/person) and you should
+Go to [localhost:8080/people](//localhost:8080/people) and you should
 see your `Person` object in JSON.
 
 REST APIs also need to serve lists of items; since `aeson` includes a `ToJSON
@@ -173,7 +192,7 @@ your `get` function to the following:
 
 {% highlight haskell %}
 
-  get "person" $ do
+  get "people" $ do
     json [Person { name = "Fry", age = 25 }, Person { name = "Bender", age = 4 }]
 
 {% endhighlight %}
@@ -189,11 +208,9 @@ Now we'll write a second route that will attempt to parse a POST body into our
 
 {% highlight haskell %}
 
-  post "person" $ do
-    maybePerson <- jsonBody
-    case (maybePerson :: Maybe Person) of
-      Nothing -> text "Failed to parse request body as Person"
-      Just thePerson  -> text $ "Parsed: " <> pack (show thePerson)
+  post "people" $ do
+    thePerson <- jsonBody' :: ApiAction Person
+    text $ "Parsed: " <> pack (show thePerson)
       
 {% endhighlight %}
 
@@ -201,7 +218,7 @@ Reload your project and start the server again. We'll need to make a POST
 request to try out our new code. Here's a way of doing so using `curl`:
 
 ```
-$ curl -H "Content-Type: application/json" -d '{ "name": "Bart", "age": 10 }' localhost:8080/person
+$ curl -H "Content-Type: application/json" -d '{ "name": "Bart", "age": 10 }' localhost:8080/people
 Parsed: Person {name = "Bart", age = 10}
 ```
 
@@ -255,7 +272,7 @@ And these imports below your existing ones:
 
 import           Control.Monad.Logger    (LoggingT, runStdoutLoggingT)
 import           Database.Persist        hiding (get) -- To avoid a naming clash with Web.Spock.get
-import qualified Database.Persist        as P         -- We'll be using P.get later for GET /person/<id>.
+import qualified Database.Persist        as P         -- We'll be using P.get later for GET /people/<id>.
 import           Database.Persist.Sqlite hiding (get)
 import           Database.Persist.TH
 
@@ -292,7 +309,7 @@ your `get` function accordingly:
       
 {% endhighlight %}
 
-Then your code should still compile and behave just as it did before the
+Then your code should still compile and behave similarly to how it did before the
 change. 
 
 ## Creating the Connection Pool
@@ -319,14 +336,23 @@ it inside `runStdoutLoggingT` which will print the function's log messages to
 standard output, allowing us to see its debug messages in our console.
 
 Because we've changed the structure of our application to contain a
-connection pool, we'll have to change our Spock application's type to reflect
-this. Change your `app` type signature to:
+connection pool, we'll have to change our Spock application's types to
+reflect this. Change your `Api` type:
 
 {% highlight haskell %}
 
-app :: SpockM SqlBackend () () ()
+type Api = SpockM SqlBackend () () ()
 
 {% endhighlight %}
+
+and your `ApiAction` type:
+
+{% highlight haskell %}
+
+type ApiAction a = SpockAction SqlBackend () () a
+
+{% endhighlight %}
+
 
 ## Creating the Schema
 
@@ -377,65 +403,157 @@ to perform some database actions.
 ## Adding People
 
 Now we're ready to use our database in our application. Let's change our
-POST /person function to insert the parsed `Person` into our database. In your
-`post "person"` function, change the `Just thePerson` pattern match to the following:
+`POST /people` function to insert the parsed `Person` into our database and
+show an appropriate JSON response. First though, add one one more helper
+function to generate simple JSON errors:
 
 {% highlight haskell %}
 
-      Just thePerson  -> do
-        runSQL $ insert thePerson
-        text "Success!"
+errorJson :: Int -> Text -> ApiAction () errorJson code message =
+  json $ object
+    [ "result" .= String "failure" ,  "error" .=
+    ]
+
+errorJson :: Int -> Text -> ApiAction ()
+errorJson code message =
+  json $
+. If you want to use errorJson, <code>you</code>'ll have to change its type signature to
+support usage in <code>IO</code<code>> and</code> W<code>ebStateM</code> (SpockAction's) contexts
+
+
+    [ "result" .= String "failure"
+    , "error" .= object ["code" .= code, "message" .= message]
+    ]
+
+{% endhighlight %}
+
+Because it's good practice for an API to always respond with JSON (or your
+preferred data format), we'll use this instead of just plain text when
+reporting errors. Returning error codes is another good practice that
+allows users to troubleshoot issues more easily.
+
+Now change your `post` action to use the `errorJson` function and insert
+a person into the database:
+
+{% highlight haskell %}
+
+  post "people" $ do
+    maybePerson <- jsonBody :: ApiAction (Maybe Person)
+    case maybePerson of
+      Nothing -> errorJson 1 "Failed to parse request body as Person"
+      Just thePerson -> do
+        newId <- runSQL $ insert thePerson
+        json $ object ["result" .= String "success", "id" .= newId]
 
 {% endhighlight %}
 
 Reload your project and start the server again. Try adding a couple of people:
 
 ```
-$ curl -H "Content-Type: application/json" -d '{ "name": "Walter", "age": 50 }' localhost:8080/person
-Success!
-$ curl -H "Content-Type: application/json" -d '{ "name": "Jesse", "age": 22 }' localhost:8080/person
-Success!
+$ curl -H "Content-Type: application/json" -d '{ "name": "Walter", "age": 50 }' localhost:8080/people
+{"result":"success","id":1}
+$ curl -H "Content-Type: application/json" -d '{ "name": "Jesse", "age": 22 }' localhost:8080/people
+{"result":"success","id":2}
 ```
 
 ## Listing People
 
-Now we'll change our `get "person"` to return a list of all the people in our table:
+Now we'll change our `get` action to return a list of all the people in our table:
 
 {% highlight haskell %}
 
-  get "person" $ do
+  get "people" $ do
     allPeople <- runSQL $ selectList [] [Asc PersonId]
     json allPeople
 
 {% endhighlight %}
 
 Reload and start the server and go to
-[localhost:8080/person](//localhost:8080/person) to see your list.
+[localhost:8080/people](//localhost:8080/people) to see your list.
 
 ## Getting a Specific Person
 
 If you look at the JSON response for
-[localhost:8080/person](//localhost:8080/person), you should see that your
+[localhost:8080/people](//localhost:8080/people), you should see that your
 `Person` objects now have `id` keys.  These values are automatically inserted
-by Persistent; we'll use them to get a person by their id. Add the following
+by Persistent: we'll use them to get a person by their id. Add the following
 route function to your `app`:
 
 {% highlight haskell %}
 
-  get ("person" <//> var) $ \id' -> do
-    mPerson <- runSQL $ P.get id'
-    case (mPerson :: Maybe Person) of
-      Nothing -> text ("Could not find a person with an id of " <> pack (show id'))
+  get ("people" <//> var) $ \personId -> do
+    maybePerson <- runSQL $ P.get personId :: ApiAction (Maybe Person)
+    case maybePerson of
+      Nothing -> errorJson 2 "Could not find a person with matching id"
       Just thePerson -> json thePerson
       
 {% endhighlight %}
 
-And again, reload and try it out: [localhost:8080/person/1](//localhost:8080/person/1).
+And again, reload and try it out: [localhost:8080/people/1](//localhost:8080/people/1).
 
-# Finishing Up
+# Finishing Up: Exercises
 
-To finish up, try adding PUT and DELETE routes yourself.  You can probably
-guess all the function names. Note that we hid `Database.Persist.delete`
-to avoid a naming clash with `Web.Spock.delete`, so you'll have to use the
-`P` namespace qualifier.
+We've implemented the foundation of our API and some of the basic
+functionality. Practice adding some features yourself by trying out these
+exercises:
 
+1. Try adding PUT and DELETE routes yourself. Note that we hid
+`Database.Persist.delete` to avoid a naming clash with `Web.Spock.delete`,
+so you'll have to use the `P` namespace qualifier.
+    <details>
+    <summary>
+    <strong>Click for hints</strong>
+    </summary>
+    For the PUT action you'll want to use <code>Web.Spock.put</code> and
+    <code>Database.Persist.Class.replace</code>. The Persistent chapter
+    in the Yesod Book has an example of using both <code>replace</code>
+    and <code>delete</code>.
+
+    For the DELETE action, you may have to explicitly declare your route
+    variable as a <code>PersonId</code> so that GHC knows which type of
+    database object you want to delete. We've explicitly declared values a
+    couple of times in our tutorial, such as decoding to <code>Person</code>
+    and <code>Value</code> and when using Spock actions.
+    </details>
+    <br>
+
+2. It is good practice to set appropriate HTTP status codes, for example:
+   - `201 Created` for successful POST and PUT actions
+   - `400 Bad Request` for failed POST and PUT actions
+   - `404 Not Found` for `GET /people/<id>` route
+
+    Try setting appropriate HTTP status codes for your actions
+    <details>
+    <summary>
+    <strong>Click for hints</strong>
+    </summary>
+    Look at the type of <code>Web.Spock.Action.setStatus</code>: it takes
+    a single argument of type <code>Status</code> and needs to be called
+    in a Spock action context. You'll have to add <code>http-types</code>
+    to your project dependencies and import its Status module to use the
+    <code>Status</code> definitions.
+    </details>
+    <br>
+
+3. Spock has a error handler for generic errors such missing routes,
+runtime exceptions, etc. By default, this returns generic HTML pages. Use
+`Web.Spock.Config.spc_errorHandler` to change your application to
+return generic JSON error responses. You can try any other route like
+[localhost:8080/](//localhost:8080/) to see the default 404 error response.
+    <details>
+    <summary>
+    <strong>Click for hints</strong>
+    </summary>
+    Your current config datatype is being constructed by passing arguments
+    to <code>defaultSpockCfg</code>. You'll want to change this to use the
+    records listed in <code>Web.Spock.Config</code> documentation.
+    <br>
+    The <code>spc_errorHandler</code> type signature shows that it
+    takes a <code>Status</code> and returns a Spock action, so you'll
+    need write a function that pattern matches on <code>Status</code>
+    types introduced in the last exercise and returns JSON errors. If you
+    want to use <code>errorJson</code>, you'll have to change its type
+    signature to allow both <code>IO</code> and <code>WebStateM</code>
+    (<code>SpockAction</code>'s) monads.
+    </details>
+    <br>
