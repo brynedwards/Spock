@@ -409,18 +409,9 @@ function to generate simple JSON errors:
 
 {% highlight haskell %}
 
-errorJson :: Int -> Text -> ApiAction () errorJson code message =
-  json $ object
-    [ "result" .= String "failure" ,  "error" .=
-    ]
-
 errorJson :: Int -> Text -> ApiAction ()
 errorJson code message =
   json $
-. If you want to use errorJson, <code>you</code>'ll have to change its type signature to
-support usage in <code>IO</code<code>> and</code> W<code>ebStateM</code> (SpockAction's) contexts
-
-
     [ "result" .= String "failure"
     , "error" .= object ["code" .= code, "message" .= message]
     ]
