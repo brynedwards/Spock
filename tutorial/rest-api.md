@@ -1,6 +1,6 @@
 ---
 layout: page
-title: "REST API Tutorial"
+title: "Building a REST API"
 date: 2017-05-01 10:52:00
 author: Bryn Edwards
 permalink: /tutorial/rest-api
