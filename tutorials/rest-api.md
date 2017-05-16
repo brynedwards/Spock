@@ -3,7 +3,7 @@ layout: page
 title: "Building a REST API"
 date: 2017-05-01 10:52:00
 author: Bryn Edwards
-permalink: /tutorial/rest-api
+permalink: /tutorials/rest-api
 hackage_base: //hackage.haskell.org/package
 ---
 
